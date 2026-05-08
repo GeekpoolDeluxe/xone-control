@@ -26,6 +26,12 @@ CONFIG_DIR = Path.home() / ".config" / "xone-control"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 CACHE_DIR = Path.home() / ".cache" / "xone-control"
 LOCK_FILE = CACHE_DIR / "xone-control.lock"
+APP_DIR = Path(__file__).resolve().parent
+ICON_DIR = APP_DIR / "icon"
+TRAY_CONNECTED_ICON = "xbox-series-x-green"
+TRAY_CONNECTED_ICON_PATH = ICON_DIR / f"{TRAY_CONNECTED_ICON}.svg"
+TRAY_DISCONNECTED_ICON = "xbox-series-x-filled"
+TRAY_DISCONNECTED_ICON_PATH = ICON_DIR / f"{TRAY_DISCONNECTED_ICON}.svg"
 
 TRANSLATIONS = {
     "de": {
@@ -458,9 +464,10 @@ class XoneControl(Gtk.Window):
         if AppIndicator:
             self.indicator = AppIndicator.Indicator.new(
                 "xone-control",
-                "input-gaming",
+                TRAY_CONNECTED_ICON,
                 AppIndicator.IndicatorCategory.HARDWARE,
             )
+            self.indicator.set_icon_theme_path(str(ICON_DIR))
             self.indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
             self.indicator.set_menu(self.tray_menu)
             return
@@ -520,10 +527,15 @@ class XoneControl(Gtk.Window):
         self.tray_battery_item.set_label(f"{tr(self.language, 'tray_battery')}: {state['battery']}")
 
         if self.indicator:
-            self.indicator.set_icon_full("input-gaming" if state["connected"] else "dialog-warning", tooltip)
+            self.indicator.set_icon_full(TRAY_CONNECTED_ICON if state["connected"] else TRAY_DISCONNECTED_ICON, tooltip)
             self.indicator.set_label(label, "")
         elif self.status_icon:
-            self.status_icon.set_from_icon_name("input-gaming" if state["connected"] else "dialog-warning")
+            if state["connected"] and TRAY_CONNECTED_ICON_PATH.exists():
+                self.status_icon.set_from_file(str(TRAY_CONNECTED_ICON_PATH))
+            elif TRAY_DISCONNECTED_ICON_PATH.exists():
+                self.status_icon.set_from_file(str(TRAY_DISCONNECTED_ICON_PATH))
+            else:
+                self.status_icon.set_from_icon_name(TRAY_DISCONNECTED_ICON)
             self.status_icon.set_tooltip_text(tooltip)
 
     def _refresh_battery(self):
