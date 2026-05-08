@@ -2,6 +2,10 @@
 
 Small GTK interface for checking and controlling local `xone` controller state.
 
+![disconnected_controller.png](documentation/disconnected_controller.png)
+![connected_controller.png](documentation/connected_controller.png)
+![statusbar.png](documentation/statusbar.png)
+
 ## Features
 
 - Shows connected `xone` controller status.
