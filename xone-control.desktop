@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=xone Control
+Comment=Status, Akku und LED-Steuerung für xone Controller
+Exec=/home/denis/xone-control/start-xone-control.sh
+Icon=input-gaming
+Terminal=false
+Categories=Utility;GTK;
