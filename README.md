@@ -11,6 +11,7 @@ Small GTK interface for checking and controlling local `xone` controller state.
 - Shows connected `xone` controller status.
 - Shows battery information from `/sys/class/power_supply/gip*`.
 - Shows and changes LED brightness and LED mode from `/sys/class/leds/gip*`.
+- Can power off individual wireless controllers when the installed `xone` driver exposes the `xone-dongle` `poweroff` sysfs control.
 - Lists loaded `xone_*` kernel modules.
 - Lists installed `xone_dongle_*.bin` firmware files.
 - Shows recent xone-related kernel messages.
@@ -42,11 +43,12 @@ Required system setup:
 - `xone` kernel driver installed and working.
 - Dongle firmware installed if the Xbox Wireless Dongle is used.
 - A connected `xone` device that exposes `/sys/class/power_supply/gip*` and/or `/sys/class/leds/gip*`.
+- For individual controller power-off, a newer `xone` driver/fork that exposes `/sys/bus/usb/drivers/xone-dongle/*/active_clients` and `/sys/bus/usb/drivers/xone-dongle/*/poweroff`.
 
 The original `xone` project is:
 
 ```text
-https://github.com/medusalix/xone
+https://github.com/dlundqvist/xone
 ```
 
 That repository is in maintenance mode. An actively maintained fork can also be used. The UI only depends on the installed driver exposing the usual `xone` sysfs paths.

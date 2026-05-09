@@ -2,7 +2,7 @@
 Type=Application
 Name=xone Control
 Comment=Status, Akku und LED-Steuerung für xone Controller
-Exec=/home/denis/xone-control/start-xone-control.sh
-Icon=input-gaming
+Exec=/home/denis/myprojects/xone-control/start-xone-control.sh
+Icon=/home/denis/myprojects/xone-control/icon/xbox-series-x-green.svg
 Terminal=false
 Categories=Utility;GTK;
