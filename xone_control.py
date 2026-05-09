@@ -20,6 +20,7 @@ except (ImportError, ValueError):
 
 
 APP_TITLE = "xone Control"
+APP_VERSION = "0.1.1"
 POLL_SECONDS = 3
 DEFAULT_LANGUAGE = "en"
 CONFIG_DIR = Path.home() / ".config" / "xone-control"
@@ -32,6 +33,7 @@ TRAY_CONNECTED_ICON = "xbox-series-x-green"
 TRAY_CONNECTED_ICON_PATH = ICON_DIR / f"{TRAY_CONNECTED_ICON}.svg"
 TRAY_DISCONNECTED_ICON = "xbox-series-x-filled"
 TRAY_DISCONNECTED_ICON_PATH = ICON_DIR / f"{TRAY_DISCONNECTED_ICON}.svg"
+APP_ICON_PATH = ICON_DIR / "xbox-series-x-green.svg"
 
 TRANSLATIONS = {
     "de": {
@@ -39,18 +41,28 @@ TRANSLATIONS = {
         "subtitle": "Status, Akku und LED-Steuerung für xone-Geräte",
         "language": "Sprache",
         "controller": "Controller",
+        "controller_power": "Controller ausschalten",
+        "tray_controller_power": "Controller ausschalten",
+        "tray_power_off_controller": "{target} ausschalten",
+        "shutdown_controller": "Ausschalten",
+        "unavailable": "Nicht verfügbar",
         "led": "LED",
         "driver": "Treiber",
         "kernel_messages": "Kernelmeldungen",
         "mode_off": "Aus",
         "mode_on": "An",
-        "mode_breathe": "Atmen",
-        "mode_blink": "Blinken",
+        "mode_blink_fast": "Schnell blinken",
+        "mode_blink_normal": "Blinken",
+        "mode_blink_slow": "Langsam blinken",
+        "mode_fade_slow": "Langsam pulsieren",
+        "mode_fade_fast": "Schnell pulsieren",
         "set_led": "LED setzen",
         "refresh": "Aktualisieren",
         "load_modules": "Module laden",
         "no_controller": "Kein xone Controller erkannt",
         "connect_controller": "Controller verbinden oder neu pairen.",
+        "no_shutdown_target": "Controller-Ausschalten wird von diesem xone-Treiber nicht bereitgestellt.",
+        "controller_slot": "{dongle} · Client {slot}",
         "device_fallback": "xone Gerät",
         "unknown": "Unbekannt",
         "connected": "Verbunden  {model}",
@@ -62,12 +74,15 @@ TRANSLATIONS = {
         "firmware": "Firmware",
         "no_kernel_messages": "Keine xone-Meldungen in den letzten Kernelzeilen.",
         "saved": "Gespeichert",
+        "led_not_applied": "LED-Änderung wurde nicht übernommen.",
         "no_permission_pkexec_missing": "Keine Rechte, und pkexec ist nicht installiert",
         "change_not_applied": "Änderung wurde nicht übernommen",
         "no_led_short": "Keine LED gefunden.",
         "modules_loaded": "Module geladen.",
         "pkexec_missing": "pkexec ist nicht installiert.",
         "modules_load_failed": "Module konnten nicht geladen werden.",
+        "controller_shutdown_sent": "Ausschalten an {target} gesendet.",
+        "controller_shutdown_failed": "Controller konnte nicht ausgeschaltet werden.",
         "tray_status": "Status",
         "tray_battery": "Akku",
         "tray_show": "Fenster anzeigen",
@@ -82,18 +97,28 @@ TRANSLATIONS = {
         "subtitle": "Status, battery and LED controls for xone devices",
         "language": "Language",
         "controller": "Controller",
+        "controller_power": "Controller power",
+        "tray_controller_power": "Controller power",
+        "tray_power_off_controller": "Power off {target}",
+        "shutdown_controller": "Power off",
+        "unavailable": "Unavailable",
         "led": "LED",
         "driver": "Driver",
         "kernel_messages": "Kernel messages",
         "mode_off": "Off",
         "mode_on": "On",
-        "mode_breathe": "Breathe",
-        "mode_blink": "Blink",
+        "mode_blink_fast": "Fast blink",
+        "mode_blink_normal": "Blink",
+        "mode_blink_slow": "Slow blink",
+        "mode_fade_slow": "Slow pulse",
+        "mode_fade_fast": "Fast pulse",
         "set_led": "Set LED",
         "refresh": "Refresh",
         "load_modules": "Load modules",
         "no_controller": "No xone controller detected",
         "connect_controller": "Connect or pair the controller again.",
+        "no_shutdown_target": "Controller power-off is not exposed by this xone driver.",
+        "controller_slot": "{dongle} · client {slot}",
         "device_fallback": "xone device",
         "unknown": "Unknown",
         "connected": "Connected  {model}",
@@ -105,12 +130,15 @@ TRANSLATIONS = {
         "firmware": "Firmware",
         "no_kernel_messages": "No xone messages in the latest kernel lines.",
         "saved": "Saved",
+        "led_not_applied": "LED change was not applied.",
         "no_permission_pkexec_missing": "No permission, and pkexec is not installed",
         "change_not_applied": "Change was not applied",
         "no_led_short": "No LED found.",
         "modules_loaded": "Modules loaded.",
         "pkexec_missing": "pkexec is not installed.",
         "modules_load_failed": "Modules could not be loaded.",
+        "controller_shutdown_sent": "Power-off sent to {target}.",
+        "controller_shutdown_failed": "Controller could not be powered off.",
         "tray_status": "Status",
         "tray_battery": "Battery",
         "tray_show": "Show window",
@@ -222,14 +250,47 @@ def led_devices():
     return leds
 
 
+def xone_dongles():
+    dongles = []
+    for path in sorted(glob.glob("/sys/bus/usb/drivers/xone-dongle/*")):
+        path = Path(path)
+        if (path / "poweroff").exists():
+            dongles.append(path)
+    return dongles
+
+
+def active_client_slots(dongle):
+    active_clients = read_text(dongle / "active_clients")
+    slots = []
+    for token in active_clients.replace("\t", " ").split():
+        if token.startswith("[") and "]*" in token:
+            slot = token[1 : token.index("]")]
+            if slot.isdigit():
+                slots.append(int(slot))
+    if slots:
+        return slots
+
+    count_text = active_clients.splitlines()[0] if active_clients else ""
+    if count_text.isdigit():
+        count = int(count_text)
+        if count == 1:
+            return [0]
+        if count > 1:
+            return list(range(16))
+    return slots
+
+
 class XoneControl(Gtk.Window):
     def __init__(self):
-        super().__init__(title=APP_TITLE)
+        super().__init__(title=f"{APP_TITLE} {APP_VERSION}")
         self.set_default_size(820, 560)
         self.set_border_width(0)
+        if APP_ICON_PATH.exists():
+            self.set_icon_from_file(str(APP_ICON_PATH))
 
         self.power_path = None
         self.led_path = None
+        self.controller_power_targets = {}
         self.config = load_config()
         self.language = self.config.get("language", DEFAULT_LANGUAGE)
         if self.language not in TRANSLATIONS:
@@ -259,6 +320,25 @@ class XoneControl(Gtk.Window):
         .muted { color: #64748b; }
         textview { font-family: monospace; font-size: 12px; }
         button { min-height: 34px; }
+        combobox, combobox button, combobox box {
+            background: #ffffff;
+            color: #1f2933;
+        }
+        combobox button:hover, combobox button:checked {
+            background: #e8eef5;
+            color: #111827;
+        }
+        combobox arrow {
+            color: #1f2933;
+        }
+        menu, menuitem {
+            background-color: #ffffff;
+            color: #1f2933;
+        }
+        menuitem:hover {
+            background-color: #e8eef5;
+            color: #111827;
+        }
         """
         provider = Gtk.CssProvider()
         provider.load_from_data(css)
@@ -274,7 +354,7 @@ class XoneControl(Gtk.Window):
         topbar.get_style_context().add_class("topbar")
         root.pack_start(topbar, False, False, 0)
 
-        title = Gtk.Label(label=APP_TITLE, xalign=0)
+        title = Gtk.Label(label=f"{APP_TITLE} {APP_VERSION}", xalign=0)
         title.get_style_context().add_class("title")
         topbar.pack_start(title, False, False, 0)
 
@@ -324,6 +404,16 @@ class XoneControl(Gtk.Window):
         self.battery_bar.set_max_value(100)
         battery_panel.pack_start(self.battery_bar, False, False, 10)
 
+        power_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        battery_panel.pack_start(power_row, False, False, 0)
+
+        self.controller_power_combo = Gtk.ComboBoxText()
+        power_row.pack_start(self.controller_power_combo, True, True, 0)
+
+        self.shutdown_controller_button = Gtk.Button()
+        self.shutdown_controller_button.connect("clicked", self.on_shutdown_controller)
+        power_row.pack_start(self.shutdown_controller_button, False, False, 0)
+
         led_panel = self._panel(left, "led")
         self.led_label = Gtk.Label(xalign=0)
         self.led_label.get_style_context().add_class("muted")
@@ -340,8 +430,11 @@ class XoneControl(Gtk.Window):
         self.mode_options = [
             ("0", "mode_off"),
             ("1", "mode_on"),
-            ("2", "mode_breathe"),
-            ("3", "mode_blink"),
+            ("2", "mode_blink_fast"),
+            ("3", "mode_blink_normal"),
+            ("4", "mode_blink_slow"),
+            ("8", "mode_fade_slow"),
+            ("9", "mode_fade_fast"),
         ]
         for value, label_key in self.mode_options:
             self.mode_combo.append(value, tr(self.language, label_key))
@@ -400,6 +493,9 @@ class XoneControl(Gtk.Window):
         for key in ("controller", "led", "driver", "kernel_messages"):
             self.translated_widgets[key].set_text(tr(self.language, key))
         self.save_led_button.set_label(tr(self.language, "set_led"))
+        self.shutdown_controller_button.set_label(tr(self.language, "shutdown_controller"))
+        self.controller_power_combo.set_tooltip_text(tr(self.language, "controller_power"))
+        self.shutdown_controller_button.set_tooltip_text(tr(self.language, "controller_power"))
         self.refresh_button.set_label(tr(self.language, "refresh"))
         self.reload_modules_button.set_label(tr(self.language, "load_modules"))
         if self.tray_menu:
@@ -407,6 +503,7 @@ class XoneControl(Gtk.Window):
             self.tray_battery_item.set_label(f"{tr(self.language, 'tray_battery')}: --")
             self.tray_show_item.set_label(tr(self.language, "tray_show"))
             self.tray_hide_item.set_label(tr(self.language, "tray_hide"))
+            self.tray_power_item.set_label(tr(self.language, "tray_controller_power"))
             self.tray_refresh_item.set_label(tr(self.language, "refresh"))
             self.tray_quit_item.set_label(tr(self.language, "tray_quit"))
 
@@ -448,6 +545,11 @@ class XoneControl(Gtk.Window):
         self.tray_hide_item.connect("activate", lambda _item: self.hide())
         self.tray_menu.append(self.tray_hide_item)
 
+        self.tray_power_item = Gtk.MenuItem()
+        self.tray_power_submenu = Gtk.Menu()
+        self.tray_power_item.set_submenu(self.tray_power_submenu)
+        self.tray_menu.append(self.tray_power_item)
+
         self.tray_refresh_item = Gtk.MenuItem()
         self.tray_refresh_item.connect("activate", lambda _item: self.refresh())
         self.tray_menu.append(self.tray_refresh_item)
@@ -488,6 +590,7 @@ class XoneControl(Gtk.Window):
 
     def refresh(self):
         self._refresh_battery()
+        self._refresh_controller_power()
         self._refresh_led()
         self._refresh_driver()
         self._refresh_logs()
@@ -563,6 +666,67 @@ class XoneControl(Gtk.Window):
             self.battery_bar.set_value(fallback.get(level, 0))
         self.battery_detail.set_text(f"{status} · {self.power_path.name}")
 
+    def _refresh_controller_power(self):
+        active_id = self.controller_power_combo.get_active_id()
+        targets = {}
+        self.controller_power_combo.remove_all()
+
+        for dongle in xone_dongles():
+            for slot in active_client_slots(dongle):
+                target_id = f"{dongle}:{slot}"
+                label = tr(
+                    self.language,
+                    "controller_slot",
+                    dongle=dongle.name,
+                    slot=f"{slot:02d}",
+                )
+                targets[target_id] = {
+                    "label": label,
+                    "poweroff_path": dongle / "poweroff",
+                    "slot": slot,
+                }
+                self.controller_power_combo.append(target_id, label)
+
+        self.controller_power_targets = targets
+        self._refresh_tray_power_menu()
+        has_targets = bool(targets)
+        self.controller_power_combo.set_sensitive(has_targets)
+        self.shutdown_controller_button.set_sensitive(has_targets)
+
+        if not has_targets:
+            self.controller_power_combo.append("none", tr(self.language, "unavailable"))
+            self.controller_power_combo.set_active_id("none")
+            self.controller_power_combo.set_tooltip_text(tr(self.language, "no_shutdown_target"))
+            return
+
+        self.controller_power_combo.set_tooltip_text(tr(self.language, "controller_power"))
+        if active_id in targets:
+            self.controller_power_combo.set_active_id(active_id)
+        else:
+            self.controller_power_combo.set_active(0)
+
+    def _refresh_tray_power_menu(self):
+        if not self.tray_menu:
+            return
+
+        for item in self.tray_power_submenu.get_children():
+            self.tray_power_submenu.remove(item)
+
+        if not self.controller_power_targets:
+            item = Gtk.MenuItem(label=tr(self.language, "unavailable"))
+            item.set_sensitive(False)
+            self.tray_power_submenu.append(item)
+            self.tray_power_item.set_sensitive(False)
+        else:
+            self.tray_power_item.set_sensitive(True)
+            for target_id, target in self.controller_power_targets.items():
+                label = tr(self.language, "tray_power_off_controller", target=target["label"])
+                item = Gtk.MenuItem(label=label)
+                item.connect("activate", self.on_tray_shutdown_controller, target_id)
+                self.tray_power_submenu.append(item)
+
+        self.tray_power_submenu.show_all()
+
     def _set_device_status(self, text, style_class):
         context = self.device_label.get_style_context()
         for css_class in ("status-ok", "status-warn", "status-bad"):
@@ -618,15 +782,47 @@ class XoneControl(Gtk.Window):
             self.message.set_text(tr(self.language, "no_led_short"))
             return
 
-        brightness_ok, brightness_msg = write_sysfs(
-            self.led_path / "brightness", int(self.brightness.get_value()), self.language
-        )
+        brightness = int(self.brightness.get_value())
         mode = self.mode_combo.get_active_id()
         mode_ok, mode_msg = True, "ok"
         if mode is not None:
             mode_ok, mode_msg = write_sysfs(self.led_path / "mode", mode, self.language)
 
-        self.message.set_text(brightness_msg if brightness_ok and mode_ok else f"{brightness_msg}; {mode_msg}")
+        brightness_ok, brightness_msg = write_sysfs(
+            self.led_path / "brightness", brightness, self.language
+        )
+
+        applied_brightness = read_text(self.led_path / "brightness")
+        applied_mode = read_text(self.led_path / "mode")
+        applied = applied_brightness == str(brightness) and (mode is None or applied_mode == mode)
+        if brightness_ok and mode_ok and applied:
+            self.message.set_text(brightness_msg)
+        elif brightness_ok and mode_ok:
+            self.message.set_text(tr(self.language, "led_not_applied"))
+        else:
+            self.message.set_text(f"{mode_msg}; {brightness_msg}")
+        self.refresh()
+
+    def on_shutdown_controller(self, _button):
+        target_id = self.controller_power_combo.get_active_id()
+        self._shutdown_controller_target(target_id)
+
+    def on_tray_shutdown_controller(self, _item, target_id):
+        self._shutdown_controller_target(target_id)
+
+    def _shutdown_controller_target(self, target_id):
+        target = self.controller_power_targets.get(target_id)
+        if not target:
+            self.message.set_text(tr(self.language, "no_shutdown_target"))
+            return
+
+        ok, _message = write_sysfs(target["poweroff_path"], target["slot"], self.language)
+        if ok:
+            self.message.set_text(
+                tr(self.language, "controller_shutdown_sent", target=target["label"])
+            )
+        else:
+            self.message.set_text(tr(self.language, "controller_shutdown_failed"))
         self.refresh()
 
     def on_load_modules(self, _button):
